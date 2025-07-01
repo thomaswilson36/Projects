@@ -1,0 +1,6 @@
+DRC Rules Export File for PCB: C:\Users\thoma\OneDrive\Desktop\New folder\PCB1 (1).PcbDoc
+RuleKind=Width|RuleName=Width_power|Scope=Board|Minimum=5.91
+RuleKind=SolderMaskExpansion|RuleName=SolderMaskExpansion|Scope=Board|Minimum=4.00
+RuleKind=Width|RuleName=Width|Scope=Board|Minimum=5.91
+RuleKind=Clearance|RuleName=Clearance|Scope=Board|Minimum=0.25
+RuleKind=ShortCircuit|RuleName=ShortCircuit|Scope=Board|Allowed=0
