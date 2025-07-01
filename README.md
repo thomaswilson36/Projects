@@ -1,0 +1,1 @@
+Welcome to my engineering project portfolio! This repository showcases a collection of projects I have completed over the years using ANSYS, MATLAB, and Verilog. These projects reflect my academic journey, hands-on experience, and technical development in simulation, modeling, and hardware description.
