@@ -1,0 +1,546 @@
+#include <iostream>
+#include <vector>
+#include <ctime>
+#include <stdexcept>
+#include <memory> // for smart pointers
+#include <limits> // for input validation
+
+using namespace std;
+
+// Custom exception classes
+class InsufficientBalanceException : public exception {
+public:
+    const char* what() const noexcept override {
+        return "Error: Insufficient balance.";
+    }
+};
+
+class InvalidAmountException : public exception {
+public:
+    const char* what() const noexcept override {
+        return "Error: Invalid amount.";
+    }
+};
+
+class InvalidPasswordException : public exception {
+public:
+    const char* what() const noexcept override {
+        return "Error: Invalid password.";
+    }
+};
+
+// Base class for Bank Account
+class BankAccount {
+protected:
+    string accountNumber;
+    string accountHolderName;
+    double balance;
+    vector<string> transactionHistory;
+
+public:
+    BankAccount(string accNumber, string accHolderName, double initialBalance)
+        : accountNumber(accNumber), accountHolderName(accHolderName), balance(initialBalance) {
+        if (initialBalance < 0) {
+            throw InvalidAmountException();
+        }
+        logTransaction("Account created with initial balance: " + to_string(initialBalance));
+    }
+
+    virtual ~BankAccount() {
+        cout << "Account " << accountNumber << " is being deleted." << endl;
+    }
+
+    double getBalance() const {
+        return balance;
+    }
+
+    void displayTransactionHistory() const {
+        cout << "Transaction History for Account " << accountNumber << ":" << endl;
+        for (const string& transaction : transactionHistory) {
+            cout << " - " << transaction << endl;
+        }
+    }
+
+    virtual void displayAccountDetails() const {
+        cout << "Account Number: " << accountNumber << endl;
+        cout << "Account Holder: " << accountHolderName << endl;
+        cout << "Balance: " << balance << endl;
+    }
+
+    void deposit(double amount) {
+        if (amount <= 0) {
+            throw InvalidAmountException();
+        }
+        balance += amount;
+        logTransaction("Deposited: " + to_string(amount));
+    }
+
+    void withdraw(double amount) {
+        if (amount <= 0) {
+            throw InvalidAmountException();
+        }
+        if (amount > balance) {
+            throw InsufficientBalanceException();
+        }
+        balance -= amount;
+        logTransaction("Withdrew: " + to_string(amount));
+    }
+
+protected:
+    void logTransaction(const string& message) {
+        time_t now = time(0);
+        string timestamp = ctime(&now);
+        timestamp.pop_back(); // Remove newline character
+        transactionHistory.push_back(timestamp + " - " + message);
+    }
+};
+
+// Derived class for Savings Account
+class SavingsAccount : public BankAccount {
+private:
+    double interestRate;
+
+public:
+    SavingsAccount(string accNumber, string accHolderName, double initialBalance, double rate)
+        : BankAccount(accNumber, accHolderName, initialBalance), interestRate(rate) {
+        if (rate < 0) {
+            throw InvalidAmountException();
+        }
+    }
+
+    void applyInterest() {
+        double interest = balance * interestRate / 100;
+        balance += interest;
+        logTransaction("Interest applied: " + to_string(interest));
+    }
+
+    void displayAccountDetails() const override {
+        BankAccount::displayAccountDetails();
+        cout << "Interest Rate: " << interestRate << "%" << endl;
+    }
+};
+
+// Derived class for Current Account
+class CurrentAccount : public BankAccount {
+private:
+    double overdraftLimit;
+
+public:
+    CurrentAccount(string accNumber, string accHolderName, double initialBalance, double limit)
+        : BankAccount(accNumber, accHolderName, initialBalance), overdraftLimit(limit) {
+        if (limit < 0) {
+            throw InvalidAmountException();
+        }
+    }
+
+    void displayAccountDetails() const override {
+        BankAccount::displayAccountDetails();
+        cout << "Overdraft Limit: " << overdraftLimit << endl;
+    }
+};
+
+// Factory class for creating accounts
+class AccountFactory {
+public:
+    static unique_ptr<BankAccount> createAccount(const string& type, string accNumber, string accHolderName, double initialBalance, double additionalParam = 0) {
+        if (type == "Savings") {
+            return make_unique<SavingsAccount>(accNumber, accHolderName, initialBalance, additionalParam);
+        } else if (type == "Current") {
+            return make_unique<CurrentAccount>(accNumber, accHolderName, initialBalance, additionalParam);
+        } else {
+            throw invalid_argument("Invalid account type.");
+        }
+    }
+};
+
+// User class to store account details and password
+class User {
+public:
+    string username;
+    string password;
+    unique_ptr<BankAccount> account;
+
+    User(string uname, string pwd, unique_ptr<BankAccount> acc)
+        : username(uname), password(pwd), account(std::move(acc)) {}
+};
+
+// Function to display menu and handle user choices for Savings Account
+void displaySavingsMenu() {
+    cout << "\nSavings Account Menu:" << endl;
+    cout << "1. View Savings Account Details" << endl;
+    cout << "2. Deposit to Savings Account" << endl;
+    cout << "3. Withdraw from Savings Account" << endl;
+    cout << "4. Back to Main Menu" << endl;
+}
+
+// Function to display menu and handle user choices for Current Account
+void displayCurrentMenu() {
+    cout << "\nCurrent Account Menu:" << endl;
+    cout << "1. View Current Account Details" << endl;
+    cout << "2. Deposit to Current Account" << endl;
+    cout << "3. Withdraw from Current Account" << endl;
+    cout << "4. Back to Main Menu" << endl;
+}
+
+// Function to display the main menu
+void displayMainMenu() {
+    cout << "\nMain Menu:" << endl;
+    cout << "1. Manage Savings Account" << endl;
+    cout << "2. Manage Current Account" << endl;
+    cout << "3. Logout" << endl;
+}
+
+// Function to display the admin menu
+void displayAdminMenu() {
+    cout << "\nAdmin Menu:" << endl;
+    cout << "1. Apply Interest to All Savings Accounts" << endl;
+    cout << "2. Deposit to Any Account" << endl;
+    cout << "3. Withdraw from Any Account" << endl;
+    cout << "4. View All Accounts" << endl;
+    cout << "5. Delete Account" << endl; // Added delete account functionality
+    cout << "6. Logout" << endl;
+}
+
+// Function to validate numeric input
+double getValidAmount() {
+    double amount;
+    while (true) {
+        cin >> amount;
+        if (cin.fail() || amount <= 0) {
+            cin.clear(); // Clear error flag
+            cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Discard invalid input
+            cout << "Invalid amount. Please enter a positive number: ";
+        } else {
+            break;
+        }
+    }
+    return amount;
+}
+
+// Function to delete an account
+void deleteAccount(vector<User>& users) {
+    cout << "Select an account to delete:" << endl;
+    for (size_t i = 0; i < users.size(); ++i) {
+        cout << i + 1 << ". " << users[i].username << endl;
+    }
+
+    int accountChoice;
+    cout << "Enter your choice (1-" << users.size() << "): ";
+    cin >> accountChoice;
+
+    if (cin.fail() || accountChoice < 1 || accountChoice > users.size()) {
+        cin.clear(); // Clear error flag
+        cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Discard invalid input
+        cout << "Invalid choice. Please try again." << endl;
+        return;
+    }
+
+    // Remove user from the vector (delete account)
+    users.erase(users.begin() + accountChoice - 1);
+    cout << "Account deleted successfully." << endl;
+}
+
+int main() {
+    try {
+        // Create a vector to store users
+        vector<User> users;
+
+        // Add 5 users with accounts and passwords
+        users.emplace_back("John Doe", "1234", AccountFactory::createAccount("Savings", "SA123456", "John Doe", 1000.0, 5.0));
+        users.emplace_back("Jane Smith", "2345", AccountFactory::createAccount("Current", "CA654321", "Jane Smith", 2000.0, 500.0));
+        users.emplace_back("Alice Johnson", "3456", AccountFactory::createAccount("Savings", "SA789012", "Alice Johnson", 1500.0, 4.0));
+        users.emplace_back("Bob Brown", "4567", AccountFactory::createAccount("Current", "CA098765", "Bob Brown", 2500.0, 1000.0));
+        users.emplace_back("Charlie Davis", "5678", AccountFactory::createAccount("Savings", "SA345678", "Charlie Davis", 3000.0, 3.5));
+
+        // Admin credentials
+        const string adminUsername = "admin";
+        const string adminPassword = "admin123";
+
+        while (true) {
+            // Display login options
+            cout << "\nSelect an option:" << endl;
+            cout << "1. User Login" << endl;
+            cout << "2. Admin Login" << endl;
+            cout << "3. Exit Program" << endl;
+
+            int loginChoice;
+            cout << "Enter your choice (1-3): ";
+            cin >> loginChoice;
+
+            if (cin.fail() || loginChoice < 1 || loginChoice > 3) {
+                cin.clear(); // Clear error flag
+                cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Discard invalid input
+                cout << "Invalid choice. Please try again." << endl;
+                continue;
+            }
+
+            if (loginChoice == 3) {
+                cout << "Exiting program." << endl;
+                break;
+            }
+
+            if (loginChoice == 2) {
+                // Admin login
+                string username, password;
+                cout << "Enter admin username: ";
+                cin >> username;
+                cout << "Enter admin password: ";
+                cin >> password;
+
+                if (username != adminUsername || password != adminPassword) {
+                    cout << "Invalid admin credentials. Please try again." << endl;
+                    continue;
+                }
+
+                cout << "Admin login successful!" << endl;
+
+                while (true) {
+                    displayAdminMenu();
+                    cout << "Enter your choice: ";
+                    int adminChoice;
+                    cin >> adminChoice;
+
+                    if (cin.fail() || adminChoice < 1 || adminChoice > 6) {
+                        cin.clear(); // Clear error flag
+                        cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Discard invalid input
+                        cout << "Invalid choice. Please try again." << endl;
+                        continue;
+                    }
+
+                    switch (adminChoice) {
+                        case 1: {
+                            // Apply interest to all Savings Accounts
+                            for (auto& user : users) {
+                                if (auto savingsAccount = dynamic_cast<SavingsAccount*>(user.account.get())) {
+                                    savingsAccount->applyInterest();
+                                    cout << "Interest applied to " << user.username << "'s account." << endl;
+                                }
+                            }
+                            break;
+                        }
+                        case 2: {
+                            // Deposit to any account
+                            cout << "Select an account to deposit to:" << endl;
+                            for (size_t i = 0; i < users.size(); ++i) {
+                                cout << i + 1 << ". " << users[i].username << endl;
+                            }
+                            int accountChoice;
+                            cout << "Enter your choice (1-" << users.size() << "): ";
+                            cin >> accountChoice;
+
+                            if (cin.fail() || accountChoice < 1 || accountChoice > users.size()) {
+                                cin.clear(); // Clear error flag
+                                cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Discard invalid input
+                                cout << "Invalid choice. Please try again." << endl;
+                                continue;
+                            }
+
+                            cout << "Enter amount to deposit: ";
+                            double depositAmount = getValidAmount();
+                            users[accountChoice - 1].account->deposit(depositAmount);
+                            cout << "Deposited: " << depositAmount << endl;
+                            cout << "Updated Balance: " << users[accountChoice - 1].account->getBalance() << endl;
+                            break;
+                        }
+                        case 3: {
+                            // Withdraw from any account
+                            cout << "Select an account to withdraw from:" << endl;
+                            for (size_t i = 0; i < users.size(); ++i) {
+                                cout << i + 1 << ". " << users[i].username << endl;
+                            }
+                            int accountChoice;
+                            cout << "Enter your choice (1-" << users.size() << "): ";
+                            cin >> accountChoice;
+
+                            if (cin.fail() || accountChoice < 1 || accountChoice > users.size()) {
+                                cin.clear(); // Clear error flag
+                                cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Discard invalid input
+                                cout << "Invalid choice. Please try again." << endl;
+                                continue;
+                            }
+
+                            cout << "Enter amount to withdraw: ";
+                            double withdrawAmount = getValidAmount();
+                            users[accountChoice - 1].account->withdraw(withdrawAmount);
+                            cout << "Withdrew: " << withdrawAmount << endl;
+                            cout << "Updated Balance: " << users[accountChoice - 1].account->getBalance() << endl;
+                            break;
+                        }
+                        case 4: {
+                            // View all accounts
+                            for (const auto& user : users) {
+                                user.account->displayAccountDetails();
+                                user.account->displayTransactionHistory();
+                                cout << "-----------------------------" << endl;
+                            }
+                            break;
+                        }
+                        case 5: {
+                            // Delete Account
+                            deleteAccount(users);
+                            break;
+                        }
+                        case 6:
+                            cout << "Logging out." << endl;
+                            break;
+                    }
+
+                    if (adminChoice == 6) {
+                        break; // Logout and return to login screen
+                    }
+                }
+            } else if (loginChoice == 1) {
+                // User login
+                cout << "\nSelect a user account to manage:" << endl;
+                for (size_t i = 0; i < users.size(); ++i) {
+                    cout << i + 1 << ". " << users[i].username << endl;
+                }
+
+                int userChoice;
+                cout << "Enter your choice (1-" << users.size() << "): ";
+                cin >> userChoice;
+
+                if (cin.fail() || userChoice < 1 || userChoice > users.size()) {
+                    cin.clear(); // Clear error flag
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Discard invalid input
+                    cout << "Invalid choice. Please try again." << endl;
+                    continue;
+                }
+
+                User& currentUser = users[userChoice - 1];
+
+                // Ask for the 4-digit password
+                string password;
+                cout << "Enter 4-digit password for " << currentUser.username << ": ";
+                cin >> password;
+
+                // Verify the password
+                if (password != currentUser.password) {
+                    cout << "Invalid password. Please try again." << endl;
+                    continue;
+                }
+
+                cout << "Login successful! Welcome, " << currentUser.username << "." << endl;
+
+                while (true) {
+                    displayMainMenu();
+                    cout << "Enter your choice: ";
+                    int menuChoice;
+                    cin >> menuChoice;
+
+                    if (cin.fail() || menuChoice < 1 || menuChoice > 3) {
+                        cin.clear(); // Clear error flag
+                        cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Discard invalid input
+                        cout << "Invalid choice. Please try again." << endl;
+                        continue;
+                    }
+
+                    switch (menuChoice) {
+                        case 1: {
+                            // Handle Savings Account Menu
+                            if (dynamic_cast<SavingsAccount*>(currentUser.account.get())) {
+                                int savingsChoice;
+                                do {
+                                    displaySavingsMenu();
+                                    cout << "Enter your choice: ";
+                                    cin >> savingsChoice;
+
+                                    if (cin.fail() || savingsChoice < 1 || savingsChoice > 4) {
+                                        cin.clear(); // Clear error flag
+                                        cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Discard invalid input
+                                        cout << "Invalid choice. Please try again." << endl;
+                                        continue;
+                                    }
+
+                                    switch (savingsChoice) {
+                                        case 1:
+                                            currentUser.account->displayAccountDetails();
+                                            currentUser.account->displayTransactionHistory();
+                                            break;
+                                        case 2: {
+                                            cout << "Enter amount to deposit: ";
+                                            double depositAmount = getValidAmount();
+                                            currentUser.account->deposit(depositAmount);
+                                            cout << "Deposited: " << depositAmount << endl;
+                                            cout << "Updated Balance: " << currentUser.account->getBalance() << endl;
+                                            break;
+                                        }
+                                        case 3: {
+                                            cout << "Enter amount to withdraw: ";
+                                            double withdrawAmount = getValidAmount();
+                                            currentUser.account->withdraw(withdrawAmount);
+                                            cout << "Withdrew: " << withdrawAmount << endl;
+                                            cout << "Updated Balance: " << currentUser.account->getBalance() << endl;
+                                            break;
+                                        }
+                                        case 4:
+                                            break;
+                                    }
+                                } while (savingsChoice != 4);
+                            } else {
+                                cout << "You do not have a Savings Account." << endl;
+                            }
+                            break;
+                        }
+                        case 2: {
+                            // Handle Current Account Menu
+                            if (dynamic_cast<CurrentAccount*>(currentUser.account.get())) {
+                                int currentChoice;
+                                do {
+                                    displayCurrentMenu();
+                                    cout << "Enter your choice: ";
+                                    cin >> currentChoice;
+
+                                    if (cin.fail() || currentChoice < 1 || currentChoice > 4) {
+                                        cin.clear(); // Clear error flag
+                                        cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Discard invalid input
+                                        cout << "Invalid choice. Please try again." << endl;
+                                        continue;
+                                    }
+
+                                    switch (currentChoice) {
+                                        case 1:
+                                            currentUser.account->displayAccountDetails();
+                                            currentUser.account->displayTransactionHistory();
+                                            break;
+                                        case 2: {
+                                            cout << "Enter amount to deposit: ";
+                                            double depositAmount = getValidAmount();
+                                            currentUser.account->deposit(depositAmount);
+                                            cout << "Deposited: " << depositAmount << endl;
+                                            cout << "Updated Balance: " << currentUser.account->getBalance() << endl;
+                                            break;
+                                        }
+                                        case 3: {
+                                            cout << "Enter amount to withdraw: ";
+                                            double withdrawAmount = getValidAmount();
+                                            currentUser.account->withdraw(withdrawAmount);
+                                            cout << "Withdrew: " << withdrawAmount << endl;
+                                            cout << "Updated Balance: " << currentUser.account->getBalance() << endl;
+                                            break;
+                                        }
+                                        case 4:
+                                            break;
+                                    }
+                                } while (currentChoice != 4);
+                            } else {
+                                cout << "You do not have a Current Account." << endl;
+                            }
+                            break;
+                        }
+                        case 3:
+                            cout << "Logging out." << endl;
+                            break;
+                    }
+
+                    if (menuChoice == 3) {
+                        break; // Logout and return to login screen
+                    }
+                }
+            }
+        }
+    }
+    catch (const exception& e) {
+        cout << e.what() << endl;
+    }
+}

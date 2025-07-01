@@ -1,0 +1,291 @@
+#include <Wire.h>
+#include <MPU6050.h>
+#include <LiquidCrystal_I2C.h>
+#include <TinyGPS++.h>
+#include <WiFi101.h> // Include WiFi library
+
+MPU6050 mpu;
+LiquidCrystal_I2C lcd(0x27, 16, 2); //setting up the lcd display
+TinyGPSPlus gps;
+
+#define GPS_BAUD 9600 // staring the serial baud globally at 9600
+#define GPS_SERIAL Serial1  // serial communcation starting between gps module and mkr1000
+
+// Declare IP addresses globally
+
+IPAddress localIP(192, 168, 0, 151); // IP address for wifi with .0
+IPAddress gateway(192, 168, 0, 1);   // IP gateway for wifi with .0
+//IPAddress localIP(192, 168, 1, 151);  // IP gateway for wifi with .1
+//IPAddress gateway(192, 168, 1, 254);  // IP gateway for wifi with .1
+IPAddress subnet(255, 255, 255, 0);  // standard mask for most wifis
+
+// WiFi credentials
+const char ssid[] = "iPhone"; // Home wifi
+const char pass[] = "12345678";
+const char* serverIP = "192.168.0.67";
+const int serverPort = 80; // Port number
+
+const int fallThreshold = 5000; // threshold for the gyro to sense a fall
+bool fallDetected = false;        // set the intial state of a fall to false
+
+// Button connected to pin 2
+const int buttonPin = 2; //reset button
+unsigned long lastButtonPress = 0; // Store last button press time
+const unsigned long debounceDelay = 200; // wait for 200 milli seconds on the button press from the last button press
+
+const int ledPin = 6; // assign pin for the led
+enum State {    // start the cases
+    INIT,
+    IDLE,
+    FALL_DETECTED,
+    SEND_GPS_DATA,
+    BUTTON_CHECK
+};
+
+State currentState = INIT; // Start in the initial state
+
+WiFiServer server(80); //start the wifi server on port 80
+WiFiClient client;
+
+void setup() {
+    Serial.begin(115200); //start a baud rate at 115200
+    delay(2000);          // allow time for the system to start
+    GPS_SERIAL.begin(GPS_BAUD);// start the gps
+    delay(2000);          // allow time for the system to start
+    Wire.begin();
+
+    // Initialize MPU6050
+    mpu.initialize(); //start the gyro
+    if (!mpu.testConnection()) {
+        Serial.println("MPU6050 connection failed"); // check the gyro has connected properly
+    }
+
+    // Initialize LCD
+    lcd.begin(16, 2);
+    lcd.backlight();
+    lcd.setCursor(0, 0);
+    lcd.print("Initializing..."); //showing the screen starting up
+    delay(2000);
+    lcd.clear();
+    lcd.print("Waiting for Wifi"); //holds the message waiting for wifi when no wifi has connected
+    long rssi = WiFi.RSSI();
+    Serial.print("Signal Strength (RSSI): "); //check the signal strength of the wifi
+    Serial.println(rssi);
+
+    // Connect to WiFi
+    connectToWiFi();
+
+    // start the LED pin code
+    pinMode(buttonPin, INPUT_PULLUP); 
+    pinMode(ledPin, OUTPUT);
+    digitalWrite(ledPin, LOW);
+    // Start web server
+    server.begin();
+
+    currentState = IDLE; // Move to idle state
+}
+
+void loop() {
+    switch (currentState) { //each switch case to only run the current code needed when it is called upon
+        case INIT:
+            // Initialization logic, if needed
+            break;
+
+        case IDLE:
+            readSensors(); // Read sensor data in idle state
+            if (fallDetected) {
+                currentState = FALL_DETECTED;
+            }
+            break;
+
+        case FALL_DETECTED: //triggers when gyro detects a fall
+            handleFall();
+            currentState = SEND_GPS_DATA; // Move to send GPS data state
+            break;
+
+        case SEND_GPS_DATA: //sends the gps data to a webserver
+            sendGPSData();
+            currentState = BUTTON_CHECK; // Move to button check state
+            break;
+
+        case BUTTON_CHECK: //check if the person has pressed the reset button
+            checkButton();
+            if (!fallDetected) {
+                currentState = IDLE; // Return to idle state if fall is reset
+            }
+            break;
+    }
+
+    // Call the server handling function
+    handleClientRequests(); //always check if there is a request on the webpage
+}
+
+
+// Function to connect to WiFi
+void connectToWiFi() {
+    Serial.print("Connecting to ");
+    Serial.println(ssid);
+
+    WiFi.config(localIP, gateway, subnet); //set up the wifi
+    while (WiFi.begin(ssid, pass) != WL_CONNECTED) {
+        Serial.print(".");
+        delay(5000);
+    }
+
+    Serial.println("WiFi connected");
+    Serial.print("Assigned IP address: ");
+    Serial.println(WiFi.localIP());
+
+}
+
+// Function to read sensors and check for fall detection
+void readSensors() {
+    // Read gyroscope values
+    int16_t ax, ay, az, gx, gy, gz;
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+    // Read GPS data
+    while (GPS_SERIAL.available() > 0) {
+        gps.encode(GPS_SERIAL.read());
+    }
+
+    // Always display current GPS and gyroscope data on the lcd display
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("GPS: ");
+    if (gps.location.isValid()) {
+        lcd.print("Lat:");
+        lcd.print(gps.location.lat(), 6); // Latitude
+        lcd.setCursor(0, 1);
+        lcd.print("     Lng:");
+        lcd.print(gps.location.lng(), 6); // Longitude
+    } else {
+        lcd.print("GPS not connected or turned on!"); // print when gps not connected
+    }
+
+    lcd.setCursor(0, 2);
+    lcd.print("Acc:"); //print the acceleration
+    lcd.print(ax);
+    lcd.print(", Gyro:"); //print the gyro data
+    lcd.print(gz); // Display gyroscope Z value
+
+    // Check for fall detection
+if ((abs(ay) > 15000) && (abs(gz) > 500) && !fallDetected) { // only trigger a fall detected when there is a viloent shake like a fall. The Gyro must be viloently shook sidways.
+        fallDetected = true;
+        lcd.setCursor(0, 0);
+        lcd.print("Fall Detected!");
+        Serial.println("Fall Detected!");
+    }
+
+    delay(500); // Small delay to avoid rapid updates
+}
+
+// Function to handle fall detection
+void handleFall() { //when fall is triggered display the messages below
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Fall Detected!");
+    Serial.println("Fall Detected!");
+    digitalWrite(ledPin, HIGH);
+
+   
+    delay(2000); // Delay to allow processing
+}
+
+// Function to send GPS data over WiFi
+void sendGPSData() { 
+    if (gps.location.isValid()) { //send the string message below to display the longitude and latitude
+        WiFiClient client;
+        if (client.connect(serverIP, serverPort)) {
+            String message = String("GET /update?lat=") + gps.location.lat() + "&lng=" + gps.location.lng() + " HTTP/1.1\r\n" +
+                             "Host: " + serverIP + "\r\n" +
+                             "Connection: close\r\n\r\n";
+            client.print(message);
+            Serial.println("GPS data sent!");
+            client.stop();
+        } else {
+            Serial.println("Connection to server failed.");
+        }
+    } else {
+        Serial.println("No GPS data to send.");
+    }
+}
+void handleClientRequests() {   // Function to handle incoming HTTP requests and serve the web page.
+                                // This function checks for client connections, processes their requests,
+                                // and responds with an HTML page that shows fall detection status and GPS data.
+    WiFiClient client = server.available(); // Check if a new client has connected to the web server
+    if (client) {
+        Serial.println("New client connected");
+
+        // Read the HTTP request
+        String request = client.readStringUntil('\r');
+        Serial.println(request); // Print the request to Serial Monitor
+        client.flush();
+
+        // Start the response with HTTP headers
+        client.println("HTTP/1.1 200 OK");
+        client.println("Content-Type: text/html");
+        client.println("Connection: close");
+        client.println();
+
+        // Begin HTML content
+        client.println("<!DOCTYPE HTML>");
+        client.println("<html>");
+        client.println("<head>");
+        client.println("<meta http-equiv='refresh' content='5'>"); // // Auto-refresh the page every 5 seconds to keep the fall detection status up-to-date
+        client.println("<title>Fall Detection</title>"); // Display Fall Detection as the title
+        client.println("</head>");
+        client.println("<body>");
+
+        // Display the main header
+        if (fallDetected) {
+            client.println("<h1 style='color: red;'>FALL DETECTED!</h1>"); // Red-colored header indicates a fall was detected
+        } else {
+            client.println("<h1 style='color: green;'>No Fall Detected</h1>"); // Green-colored header indicates no fall detected
+        }
+
+        // Display additional information, such as GPS data
+        client.println("<h2>GPS Location:</h2>");
+        if (gps.location.isValid()) { // check if there is a valid gps location before printing
+            client.print("<p>Latitude: ");
+            client.print(gps.location.lat(), 6);  // Print latitude with 6 decimal places
+            client.print("</p>");
+            client.print("<p>Longitude: ");
+            client.print(gps.location.lng(), 6);  // Print longitude with 6 decimal places
+            client.print("</p>");
+        } else {
+            client.println("<p>No GPS fix available</p>");
+        }
+
+        client.println("</body>");
+        client.println("</html>");
+
+        delay(1); // Give the client time to receive the data
+        client.stop(); // Close the connection
+        Serial.println("Client disconnected");
+    }
+}
+
+
+
+// Function to check if the button is pressed to reset the fall detection
+
+void checkButton() {
+    // Read the state of the button
+    bool currentButtonState = digitalRead(buttonPin) == HIGH; 
+
+    // Debounce: Check if enough time has passed since the last button press
+    if (currentButtonState && (millis() - lastButtonPress) > debounceDelay) {
+        // Reset fall detection when button is pressed
+        if (fallDetected) {
+            fallDetected = false;
+            lcd.clear();
+            lcd.setCursor(0, 0);
+            lcd.print("Fall Reset!");
+            delay(1000);  // Display reset message for 1 second
+            digitalWrite(ledPin, LOW);
+        }
+        lastButtonPress = millis(); // Update the last press time
+    }
+    
+}
